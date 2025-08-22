@@ -2,6 +2,7 @@ package server
 
 import (
 	"duchm1606/rogo/internal/config"
+	"duchm1606/rogo/internal/core"
 	"duchm1606/rogo/internal/core/io_multiplexing"
 	"io"
 	"log"
@@ -9,26 +10,26 @@ import (
 	"syscall"
 )
 
-func readCommand(fd int) (string, error) {
+func readCommand(fd int) (*core.Command, error) {
 	var buf = make([]byte, 512)
 
 	n, err := syscall.Read(fd, buf)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if n == 0 {
-		return "", io.EOF
+		return nil, io.EOF
 	}
-	return string(buf[:n]), nil
+	return core.ParseCommand(buf)
 }
 
-func respond(data string, fd int) error {
-	if _, err := syscall.Write(fd, []byte(data)); err != nil {
-		return err
-	}
-	return nil
-}
+// func respond(data string, fd int) error {
+// 	if _, err := syscall.Write(fd, []byte(data)); err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
 func RunIoMultiplexingServer() {
 	log.Println("starting an I/O Multiplexing TCP server on", config.Port)
@@ -75,7 +76,8 @@ func RunIoMultiplexingServer() {
 			log.Fatal(err)
 		}
 
-		for _, event := range events {
+		for i, event := range events {
+			// New connection is requesting to serverFd (listener)
 			if event.Fd == serverFd {
 				log.Println("New client is trying to connect")
 				// accept the connection
@@ -108,8 +110,8 @@ func RunIoMultiplexingServer() {
 					log.Println("err", err)
 					continue
 				}
-				if err = respond(cmd, event.Fd); err != nil {
-					log.Println("err", err)
+				if err = core.ExecuteAndResponse(cmd, events[i].Fd); err != nil {
+					log.Println("err write:", err)
 				}
 			}
 		}
