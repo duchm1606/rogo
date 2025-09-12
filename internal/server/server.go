@@ -2,12 +2,14 @@ package server
 
 import (
 	"duchm1606/rogo/internal/config"
+	"duchm1606/rogo/internal/constant"
 	"duchm1606/rogo/internal/core"
 	"duchm1606/rogo/internal/core/io_multiplexing"
 	"io"
 	"log"
 	"net"
 	"syscall"
+	"time"
 )
 
 func readCommand(fd int) (*core.Command, error) {
@@ -68,8 +70,15 @@ func RunIoMultiplexingServer() {
 	}
 
 	var events = make([]io_multiplexing.Event, config.MaxConnection)
+	var lastActiveExpireExecTime = time.Now()
+
 
 	for {
+		// Check last execution time and call if it is more than 100ms ago.
+		if time.Now().After(lastActiveExpireExecTime.Add(constant.ActiveExpireFrequency)) {
+			core.ActiveDeleteExpiredKeys()
+			lastActiveExpireExecTime = time.Now()
+		}
 		// wait for file descriptor events ready. IO blocking here
 		events, err = ioMultiplexingServer.Wait()
 		if err != nil {
