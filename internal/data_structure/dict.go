@@ -7,12 +7,17 @@ import (
 )
 
 type Obj struct {
-	Value interface{}
+	Value          interface{}
+	LastAccessTime uint32
 }
 
 type Dict struct {
 	dictStore        map[string]*Obj
 	expiredDictStore map[string]uint64
+}
+
+func now() uint32 {
+	return uint32(time.Now().Unix())
 }
 
 func CreateDict() *Dict {
@@ -33,7 +38,8 @@ func (d *Dict) GetDictStore() map[string]*Obj {
 
 func (d *Dict) NewObj(key string, value interface{}, ttlMs int64) *Obj {
 	obj := &Obj{
-		Value: value,
+		Value:          value,
+		LastAccessTime: now(),
 	}
 	if ttlMs > 0 {
 		d.SetExpiry(key, ttlMs)
@@ -61,6 +67,7 @@ func (d *Dict) HasExpired(key string) bool {
 func (d *Dict) Get(k string) *Obj {
 	v := d.dictStore[k]
 	if v != nil {
+		v.LastAccessTime = now()
 		if d.HasExpired(k) {
 			d.Del(k)
 			return nil
@@ -81,10 +88,39 @@ func (d *Dict) evictRandom() {
 	}
 }
 
+func (d *Dict) populateEpool() {
+	remain := config.EpoolLruSampleSize
+	for k := range d.dictStore {
+		ePool.Push(k, d.dictStore[k].LastAccessTime)
+		remain--
+		if remain == 0 {
+			break
+		}
+	}
+	log.Println("EPool:")
+	for _, item := range ePool.pool {
+		log.Println(item.key, item.lastAccessTime)
+	}
+}
+
+func (d *Dict) evictLru() {
+	d.populateEpool()
+	evictCount := int64(config.EvictionRatio * float64(config.MaxKeyNumber))
+	log.Print("trigger LRU eviction")
+	for i := 0; i < int(evictCount) && len(ePool.pool) > 0; i++ {
+		item := ePool.Pop()
+		if item != nil {
+			d.Del(item.key)
+		}
+	}
+}
+
 func (d *Dict) evict() {
 	switch config.EvictionPolicy {
 	case "allkeys-random":
 		d.evictRandom()
+	case "allkeys-lru":
+		d.evictLru()
 	}
 }
 
